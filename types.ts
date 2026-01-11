@@ -1,10 +1,19 @@
 
+export type WatermarkPosition = 
+  | 'top-left' 
+  | 'top-right' 
+  | 'bottom-left' 
+  | 'bottom-right' 
+  | 'center' 
+  | 'tile' 
+  | 'top-bottom';
+
 export interface WatermarkSettings {
   text: string;
   fontSize: number;
   color: string;
   opacity: number;
-  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' | 'tile' | 'top-bottom';
+  positions: WatermarkPosition[];
   fontFamily: string;
   rotation: number;
 }

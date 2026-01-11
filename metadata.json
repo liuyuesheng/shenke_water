@@ -1,5 +1,5 @@
 {
-  "name": "MarkMaster Pro - Batch Image Watermarking",
-  "description": "A high-performance batch image watermarking tool that supports folder traversal, custom watermarks, and direct file system output.",
+  "name": "MarkMaster Pro - 企业级批量水印工具",
+  "description": "基于浏览器本地渲染的极致高效水印套件，支持文件夹遍历与本地目录回写。",
   "requestFramePermissions": []
 }

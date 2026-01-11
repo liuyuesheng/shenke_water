@@ -11,37 +11,43 @@ const ProcessingStatus: React.FC<Props> = ({ stats, isProcessing }) => {
   const progressPercent = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
   
   return (
-    <section className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700 backdrop-blur-sm">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+    <section className="bg-[#0a0a0a] p-8 rounded-[2rem] border border-white/10 shadow-xl overflow-hidden relative group">
+      <div className="absolute top-0 left-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-emerald-500 transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
         <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            Batch Status
-            {isProcessing && <span className="ml-2 px-2 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 rounded-full animate-pulse">PROCESSING</span>}
+          <h2 className="text-xl font-black flex items-center gap-3">
+            队列执行进度
+            {isProcessing && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 text-[9px] bg-blue-500/20 text-blue-400 rounded-full border border-blue-500/20 tracking-[0.1em] animate-pulse">
+                ENGINE ACTIVE
+              </span>
+            )}
           </h2>
-          <p className="text-sm text-slate-500">
-            {stats.completed} of {stats.total} processed
+          <p className="text-sm text-slate-500 mt-1 font-medium">
+            已处理 {stats.completed} 份文件，共 {stats.total} 份
           </p>
         </div>
         
-        <div className="grid grid-cols-3 gap-4 w-full md:w-auto">
-          <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 text-center">
-            <p className="text-xs text-slate-500 uppercase tracking-tight">Total</p>
-            <p className="text-xl font-bold">{stats.total}</p>
+        <div className="grid grid-cols-3 gap-6">
+          <div className="text-center">
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">队列</p>
+            <p className="text-2xl font-black text-white">{stats.total}</p>
           </div>
-          <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 text-center">
-            <p className="text-xs text-emerald-500 uppercase tracking-tight">Done</p>
-            <p className="text-xl font-bold text-emerald-500">{stats.completed}</p>
+          <div className="text-center">
+            <p className="text-[10px] text-emerald-500/70 font-bold uppercase tracking-widest mb-1">完成</p>
+            <p className="text-2xl font-black text-emerald-500">{stats.completed}</p>
           </div>
-          <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20 text-center">
-            <p className="text-xs text-red-500 uppercase tracking-tight">Failed</p>
-            <p className="text-xl font-bold text-red-500">{stats.failed}</p>
+          <div className="text-center">
+            <p className="text-[10px] text-red-500/70 font-bold uppercase tracking-widest mb-1">错误</p>
+            <p className="text-2xl font-black text-red-500">{stats.failed}</p>
           </div>
         </div>
       </div>
 
-      <div className="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+      <div className="mt-8 h-2.5 bg-white/5 rounded-full overflow-hidden p-[2px] border border-white/5">
         <div 
-          className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-500 ease-out shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+          className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] rounded-full shadow-[0_0_15px_rgba(37,99,235,0.4)]"
           style={{ width: `${progressPercent}%` }}
         />
       </div>

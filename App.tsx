@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { WatermarkSettings, ImageFile, ProcessingStats } from './types';
 import FileUploader from './components/FileUploader';
 import WatermarkControls from './components/WatermarkControls';
@@ -10,15 +10,15 @@ import JSZip from 'https://esm.sh/jszip@3.10.1';
 
 const DEFAULT_SETTINGS: WatermarkSettings = {
   text: '深氪旷工',
-  fontSize: 40,
+  fontSize: 48,
   color: '#ffffff',
-  opacity: 0.4,
-  position: 'top-bottom',
-  fontFamily: 'sans-serif',
+  opacity: 0.6,
+  positions: ['center'],
+  fontFamily: 'Inter, system-ui, sans-serif',
   rotation: 0,
 };
 
-const App: React.FC = () => {
+export default function App() {
   const [files, setFiles] = useState<ImageFile[]>([]);
   const [settings, setSettings] = useState<WatermarkSettings>(DEFAULT_SETTINGS);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -30,233 +30,197 @@ const App: React.FC = () => {
   }), [files]);
 
   const handleFilesSelected = (newFiles: File[]) => {
-    const formattedFiles: ImageFile[] = newFiles
-      .filter(file => file.type.startsWith('image/'))
-      .map(file => ({
-        id: Math.random().toString(36).substr(2, 9),
-        file,
-        name: file.name,
-        size: file.size,
-        status: 'pending',
-        previewUrl: URL.createObjectURL(file),
+    const formatted = newFiles
+      .filter(f => f.type.startsWith('image/'))
+      .map(f => ({
+        id: crypto.randomUUID(),
+        file: f,
+        name: f.name,
+        size: f.size,
+        status: 'pending' as const,
+        previewUrl: URL.createObjectURL(f),
       }));
-    setFiles(prev => [...prev, ...formattedFiles]);
+    setFiles(prev => [...prev, ...formatted]);
   };
 
-  const downloadFile = (blob: Blob, fileName: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `wm_${fileName}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleDownloadAllZip = async () => {
-    const completedFiles = files.filter(f => f.status === 'completed' && f.processedBlob);
-    if (completedFiles.length === 0) return;
-
-    const zip = new JSZip();
-    completedFiles.forEach(file => {
-      zip.file(`wm_${file.name}`, file.processedBlob!);
+  const clearAll = useCallback(() => {
+    // 释放所有预览和处理后的 URL
+    files.forEach(f => {
+      URL.revokeObjectURL(f.previewUrl);
     });
+    setFiles([]);
+  }, [files]);
 
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `深氪旷工_水印图片_${new Date().getTime()}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleProcessAll = async () => {
-    if (files.length === 0) return;
+  const processBatch = async () => {
+    if (isProcessing || files.length === 0) return;
     setIsProcessing(true);
 
-    const updatedFiles = [...files];
-
-    for (let i = 0; i < updatedFiles.length; i++) {
-      if (updatedFiles[i].status === 'completed') continue;
-
+    // 自动清除之前的执行状态，开始新的生成
+    const freshFiles = files.map(f => ({
+      ...f,
+      status: 'pending' as const,
+      processedBlob: undefined
+    }));
+    setFiles(freshFiles);
+    
+    // 按顺序处理
+    for (let i = 0; i < freshFiles.length; i++) {
+      setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'processing' } : f));
+      
       try {
-        setFiles(prev => {
-          const next = [...prev];
-          next[i] = { ...next[i], status: 'processing' };
-          return next;
-        });
-
-        const resultBlob = await applyWatermark(updatedFiles[i].file, settings);
+        const blob = await applyWatermark(freshFiles[i].file, settings);
+        const newPreviewUrl = URL.createObjectURL(blob);
         
-        setFiles(prev => {
-          const next = [...prev];
-          next[i] = { 
-            ...next[i], 
-            status: 'completed', 
-            processedBlob: resultBlob,
-            previewUrl: URL.createObjectURL(resultBlob) 
-          };
-          return next;
-        });
-      } catch (error) {
-        console.error(`Error processing ${updatedFiles[i].name}:`, error);
-        setFiles(prev => {
-          const next = [...prev];
-          next[i] = { ...next[i], status: 'error' };
-          return next;
-        });
+        setFiles(prev => prev.map((f, idx) => {
+          if (idx === i) {
+            // 不再需要旧的预览图
+            URL.revokeObjectURL(f.previewUrl);
+            return { 
+              ...f, 
+              status: 'completed', 
+              processedBlob: blob,
+              previewUrl: newPreviewUrl
+            };
+          }
+          return f;
+        }));
+      } catch (err) {
+        console.error('Processing failed for', freshFiles[i].name, err);
+        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'error' } : f));
       }
     }
     setIsProcessing(false);
   };
 
-  const clearFiles = () => {
-    files.forEach(f => {
-      URL.revokeObjectURL(f.previewUrl);
-    });
-    setFiles([]);
+  const downloadAll = async () => {
+    const done = files.filter(f => f.status === 'completed' && f.processedBlob);
+    if (done.length === 0) return;
+
+    const zip = new JSZip();
+    done.forEach(f => zip.file(`marked_${f.name}`, f.processedBlob!));
+    
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MarkMaster_Batch_${new Date().getTime()}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="min-h-screen p-4 md:p-8 flex flex-col gap-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-700 pb-6">
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-            深氪旷工 - 批量水印
-          </h1>
-          <p className="text-slate-400 mt-1">高效、纯净的批量图片处理工具</p>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          {files.length > 0 && (
-            <>
-              <button
-                onClick={clearFiles}
-                className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors"
-              >
-                清空列表
-              </button>
-              {stats.completed > 0 && (
-                <button
-                  onClick={handleDownloadAllZip}
-                  className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-emerald-900/20"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  一键打包下载全部 ({stats.completed})
-                </button>
-              )}
-            </>
-          )}
-          <button
-            onClick={handleProcessAll}
-            disabled={isProcessing || files.length === 0}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg font-semibold transition-all shadow-lg shadow-blue-900/20 flex items-center gap-2"
-          >
-            {isProcessing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                处理中...
-              </>
-            ) : (
-              '执行批量处理'
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Config */}
-        <div className="lg:col-span-4 space-y-8 sticky top-8">
-          <section className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700 backdrop-blur-sm">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-blue-400">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-              </svg>
-              水印配置
-            </h2>
-            <WatermarkControls settings={settings} onUpdate={setSettings} />
-          </section>
-
-          <section className="bg-slate-800/20 p-6 rounded-2xl border border-dashed border-slate-700 text-slate-500 text-sm">
-            <p>💡 提示：</p>
-            <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>处理完成后，点击顶部的“一键打包下载”可获得 ZIP 压缩包。</li>
-              <li>支持批量拖入整个文件夹。</li>
-              <li>图片处理完全在本地浏览器完成，不会上传到服务器。</li>
-            </ul>
-          </section>
-        </div>
-
-        {/* Right Column: Files and Preview */}
-        <div className="lg:col-span-8 space-y-8">
-          {files.length === 0 ? (
-            <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-3xl p-12 flex flex-col items-center text-center">
-              <FileUploader onFilesSelected={handleFilesSelected} />
+    <div className="min-h-screen bg-[#000000] text-slate-100 selection:bg-blue-500/30 font-sans">
+      <div className="max-w-[1440px] mx-auto px-6 py-8 flex flex-col gap-8">
+        {/* Top Navbar */}
+        <header className="flex flex-col md:flex-row items-center justify-between gap-6 border-b border-white/5 pb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             </div>
-          ) : (
-            <>
-              <ProcessingStatus stats={stats} isProcessing={isProcessing} />
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <section className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700 overflow-hidden">
-                  <h2 className="text-lg font-semibold mb-4">效果预览</h2>
-                  <PreviewSection file={files[0]} settings={settings} />
-                </section>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
+                MarkMaster <span className="text-blue-500 text-sm font-bold bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">PRO</span>
+              </h1>
+              <p className="text-slate-500 text-xs font-medium">企业级本地化批量水印工具</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {files.length > 0 && (
+              <button 
+                onClick={clearAll}
+                disabled={isProcessing}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-all active:scale-95 disabled:opacity-50"
+              >
+                清除任务
+              </button>
+            )}
 
-                <section className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700 overflow-hidden flex flex-col h-[500px]">
-                  <h2 className="text-lg font-semibold mb-4 flex justify-between items-center">
-                    列表 ({files.length})
-                    <FileUploader onFilesSelected={handleFilesSelected} compact />
-                  </h2>
-                  <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                    {files.map((file) => (
-                      <div 
-                        key={file.id} 
-                        className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-700/50 hover:bg-slate-900 transition-colors group"
-                      >
-                        <div className="w-12 h-12 rounded bg-slate-800 flex-shrink-0 overflow-hidden">
-                          <img src={file.previewUrl} className="w-full h-full object-cover" alt="" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{file.name}</p>
-                          <p className="text-xs text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {file.status === 'completed' && (
-                            <button
-                              onClick={() => file.processedBlob && downloadFile(file.processedBlob, file.name)}
-                              className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                            </button>
-                          )}
-                          {file.status === 'processing' && (
-                            <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-                          )}
-                          {file.status === 'error' && (
-                            <span className="p-1 rounded-full bg-red-500/20 text-red-500 text-xs font-bold">!</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+            <button 
+              onClick={processBatch}
+              disabled={files.length === 0 || isProcessing}
+              className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 px-6 py-2 rounded-lg text-sm font-bold transition-all shadow-xl shadow-blue-900/10 active:scale-95 flex items-center gap-2"
+            >
+              {isProcessing && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
+              {isProcessing ? '处理中...' : '开始批量执行'}
+            </button>
+            
+            {stats.completed > 0 && (
+              <button 
+                onClick={downloadAll}
+                className="bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg text-sm font-bold transition-all active:scale-95"
+              >
+                打包下载 ({stats.completed})
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+          <aside className="lg:col-span-4 space-y-6">
+            <div className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-8 shadow-2xl">
+              <div className="flex items-center gap-2 mb-8">
+                <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">配置面板</h3>
               </div>
-            </>
-          )}
-        </div>
+              <WatermarkControls settings={settings} onUpdate={setSettings} />
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-600/10 to-transparent border border-blue-500/10 rounded-2xl p-6">
+              <h4 className="text-sm font-bold text-blue-400 mb-2">💡 操作提示</h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                点击“开始批量执行”时会自动重置之前的结果并按当前配置重新生成。支持多选位置，水印将同时渲染在所有选定区域。
+              </p>
+            </div>
+          </aside>
+
+          <section className="lg:col-span-8 space-y-8">
+            {files.length === 0 ? (
+              <div className="h-[500px] md:h-[600px] bg-[#0a0a0a] border-2 border-dashed border-white/10 rounded-[3rem] flex items-center justify-center p-6 transition-colors hover:border-blue-500/20 group relative overflow-hidden">
+                <FileUploader onFilesSelected={handleFilesSelected} />
+              </div>
+            ) : (
+              <div className="space-y-8 animate-in fade-in duration-700">
+                <ProcessingStatus stats={stats} isProcessing={isProcessing} />
+                
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2">效果预览 (当前配置)</h4>
+                    <PreviewSection file={files[0]} settings={settings} />
+                  </div>
+                  
+                  <div className="flex flex-col h-[520px]">
+                    <div className="flex justify-between items-center mb-4 px-2">
+                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">待处理列表 ({files.length})</h4>
+                      <FileUploader onFilesSelected={handleFilesSelected} compact />
+                    </div>
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                      {files.map((f) => (
+                        <div key={f.id} className={`flex items-center gap-4 p-3 rounded-2xl border transition-all ${f.status === 'completed' ? 'bg-emerald-500/5 border-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.05)]' : 'bg-white/5 border-white/5'}`}>
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-white/10">
+                            <img src={f.previewUrl} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-bold truncate text-slate-300 uppercase">{f.name}</div>
+                            <div className="text-[9px] text-slate-600 mt-0.5 font-mono">{(f.size / 1024 / 1024).toFixed(2)} MB</div>
+                          </div>
+                          <div className="flex-shrink-0 flex items-center gap-2">
+                            {f.status === 'processing' && <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>}
+                            {f.status === 'completed' && <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>}
+                            {f.status === 'error' && <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/></svg>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </main>
       </div>
     </div>
   );
-};
-
-export default App;
+}
