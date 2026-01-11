@@ -1,0 +1,5 @@
+{
+  "name": "MarkMaster Pro - Batch Image Watermarking",
+  "description": "A high-performance batch image watermarking tool that supports folder traversal, custom watermarks, and direct file system output.",
+  "requestFramePermissions": []
+}
